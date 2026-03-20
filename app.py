@@ -9,36 +9,29 @@ import pytz
 import streamlit.components.v1 as components
 
 # --- [1. 기본 설정 및 UI 최적화] ---
-# 상단 잘림 방지를 위해 padding 조절 및 전체 레이아웃 설정
 st.set_page_config(page_title="전북 극한호우 실시간 감시", layout="wide")
 
-st.markdown("""
+# 상단 잘림 방지 및 여백 최적화 (가장 안전한 HTML 방식)
+st.html("""
     <style>
-    /* 상단 메뉴바와 타이틀 사이 여백 확보 */
-    .stApp { margin-top: -50px; }
     .block-container { padding-top: 2rem !important; padding-bottom: 0rem; }
-    /* 메트릭 텍스트 크기 조절 */
     [data-testid="stMetricValue"] { font-size: 1.4rem !important; color: #1E88E5; }
-    /* 데이터프레임 폰트 조절 */
-    .stDataFrame { font-size: 12px; }
     </style>
-    """, unsafe_allow_stdio=True)
+""")
 
 API_KEY = "Tt8x4uYTSKufMeLmE-ir3Q"
 KST = pytz.timezone('Asia/Seoul')
 
-# --- [2. 핵심 엔진: 데이터 수집 및 계산] ---
+# --- [2. 데이터 수집 엔진] ---
 @st.cache_data(ttl=600)
 def fetch_weather(nx, ny):
-    """최근 3시간 이내의 가장 최신 기상 데이터를 수집"""
     now = datetime.now(KST)
-    for i in range(1, 4): # 현재 시간부터 3시간 전까지 시도
+    # 최근 3시간 내의 가장 최신 데이터 탐색
+    for i in range(1, 4):
         target_time = (now - timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
         base_date = target_time.strftime("%Y%m%d")
         base_time = target_time.strftime("%H00")
-        
         url = f"http://apis.data.go.kr{API_KEY}&dataType=JSON&base_date={base_date}&base_time={base_time}&nx={nx}&ny={ny}"
-        
         try:
             res = requests.get(url, timeout=5).json()
             if res['response']['header']['resultCode'] == '00':
@@ -60,15 +53,15 @@ def get_hri(w):
     return min(100, round(score, 1))
 
 # --- [3. 메인 화면 구성] ---
-# 상단 헤더: 타이틀과 실시간 시계
-t1, t2 = st.columns([7, 3])
+# 상단 헤더
+t1, t2 = st.columns(2)
 with t1:
-    st.title("🌊 전북 14개 시군 극한호우 실시간 감시 (HRI 2.0)")
+    st.subheader("🌊 전북 14개 시군 극한호우 실시간 감시 (HRI 2.0)")
 with t2:
     components.html(f"""
-        <div style="text-align:right; font-family:sans-serif; padding-top:10px;">
-            <div id="clock" style="font-size:20px; font-weight:bold; color:#1E88E5;">⏱️ 로딩 중...</div>
-            <div style="font-size:11px; color:gray;">전북특별자치도 방재 연구용</div>
+        <div style="text-align:right; font-family:sans-serif;">
+            <div id="clock" style="font-size:18px; font-weight:bold; color:#1E88E5;">⏱️ 로딩 중...</div>
+            <div style="font-size:11px; color:gray;">전북특별자치도 방재 연구용 데이터</div>
         </div>
         <script>
             function updateClock() {{
@@ -78,9 +71,8 @@ with t2:
             }}
             setInterval(updateClock, 1000); updateClock();
         </script>
-    """, height=70)
+    """, height=50)
 
-# 시군 좌표 정의
 LOCATIONS = {
     "전주": {"nx": 63, "ny": 89, "lat": 35.824, "lon": 127.148},
     "군산": {"nx": 56, "ny": 92, "lat": 35.967, "lon": 126.736},
@@ -98,11 +90,11 @@ LOCATIONS = {
     "부안": {"nx": 56, "ny": 87, "lat": 35.731, "lon": 126.733}
 }
 
-# 데이터 일괄 로드
+# 데이터 로드
 all_data = {name: fetch_weather(info['nx'], info['ny']) for name, info in LOCATIONS.items()}
 
-# 1행: 지도 및 실시간 순위 현황
-m1, m2 = st.columns([6, 4])
+# 1행: 지도 및 순위 현황
+m1, m2 = st.columns(2)
 with m1:
     m = folium.Map(location=[35.7, 127.1], zoom_start=8, tiles="cartodbpositron")
     for name, info in LOCATIONS.items():
@@ -110,7 +102,7 @@ with m1:
         folium.CircleMarker([info['lat'], info['lon']], radius=10, 
                             color="red" if sc>=95 else "orange" if sc>=80 else "green", 
                             fill=True, fill_opacity=0.7, popup=f"{name}: {sc}").add_to(m)
-    st_folium(m, width="100%", height=400, returned_objects=[])
+    st_folium(m, width="100%", height=380, returned_objects=[])
 
 with m2:
     summary = []
@@ -118,33 +110,32 @@ with m2:
         sc = get_hri(all_data[name])
         summary.append({"지역": name, "HRI": sc, "상태": "🔴 위험" if sc>=95 else "🟠 주의" if sc>=80 else "🟢 정상"})
     df_sum = pd.DataFrame(summary).sort_values("HRI", ascending=False)
-    st.dataframe(df_sum, hide_index=True, use_container_width=True, height=400)
+    st.dataframe(df_sum, hide_index=True, use_container_width=True, height=380)
 
-# 2행: 상세 분석 및 실제 관측값
+# 2행: 상세 분석
 st.divider()
-b1, b2, b3 = st.columns([3, 4, 3])
+b1, b2, b3 = st.columns(3)
 
 with b1:
-    target = st.selectbox("🎯 분석 시군 선택", list(LOCATIONS.keys()))
+    target = st.selectbox("🎯 분석 지역 선택", list(LOCATIONS.keys()))
     w = all_data[target]
     sc = get_hri(w)
-    if sc >= 95: st.error("🚨 극한호우 경보 발령")
-    elif sc >= 80: st.warning("⚠️ 집중호우 모니터링 강화")
-    else: st.success("✅ 현재 기상 안정")
-    if w: st.caption(f"📡 최근 수신: {w['base']}")
+    if sc >= 95: st.error("🚨 극한호우 경보")
+    elif sc >= 80: st.warning("⚠️ 집중호우 주의")
+    else: st.success("✅ 기상 안정")
+    if w: st.caption(f"📡 관측기준: {w['base']}")
 
 with b2:
-    fig = go.Figure(go.Indicator(mode="gauge+number", value=sc, domain={'x':[0,1], 'y':[0,1]},
-        gauge={'axis': {'range':[0, 100]}, 'steps': [{'range':[0,60], 'color':"#E8F5E9"}, {'range':[60,80], 'color':"#FFF59D"}, 
-                                                  {'range':[80,95], 'color':"#FFCC80"}, {'range':[95,100], 'color':"#EF9A9A"}],
+    fig = go.Figure(go.Indicator(mode="gauge+number", value=sc, domain={'x': [0, 1], 'y': [0, 1]},
+        gauge={'axis': {'range': [0, 100]}, 'steps': [{'range': [0, 40], 'color': "#E8F5E9"}, {'range': [40, 80], 'color': "#FFF59D"}, 
+                                                  {'range': [80, 95], 'color': "#FFCC80"}, {'range': [95, 100], 'color': "#EF9A9A"}],
                'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}}))
-    fig.update_layout(height=230, margin=dict(l=10, r=10, t=40, b=0))
+    fig.update_layout(height=220, margin=dict(l=10, r=10, t=30, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
 with b3:
     if w:
-        st.metric("🌡️ 현재 기온", f"{w['T1H']}°C")
-        st.metric("🌧️ 1시간 강수량", f"{w['RN1']}mm")
+        st.metric("🌡️ 기온", f"{w['T1H']}°C")
+        st.metric("🌧️ 강수량", f"{w['RN1']}mm/h")
         st.write(f"💧 습도: {w['REH']}% | 💨 풍속: {w['WSD']}m/s")
-    else:
-        st.info("데이터 수신 대기 중...")
+    else: st.info("수신 대기 중")
