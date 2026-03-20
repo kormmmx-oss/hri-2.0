@@ -8,25 +8,31 @@ from datetime import datetime, timedelta
 import pytz
 import streamlit.components.v1 as components
 
-# --- [1. 기본 설정 및 UI 최적화] ---
+# --- [1. 기본 설정 및 상단 여백 수정] ---
 st.set_page_config(page_title="전북 극한호우 실시간 감시", layout="wide")
 
-# 상단 잘림 방지 및 여백 최적화 (가장 안전한 HTML 방식)
-st.html("""
+# CSS: 상단 padding을 대폭 늘려 잘림 방지 및 메트릭 폰트 최적화
+st.markdown("""
     <style>
-    .block-container { padding-top: 2rem !important; padding-bottom: 0rem; }
+    /* 상단 여백 확보 */
+    .block-container { 
+        padding-top: 4rem !important; 
+        padding-bottom: 0rem !important; 
+    }
+    /* 타이틀 폰트 크기 및 간격 조정 */
+    h2 { margin-top: -1rem; padding-bottom: 1rem; }
+    /* 메트릭 값 크기 조정 */
     [data-testid="stMetricValue"] { font-size: 1.4rem !important; color: #1E88E5; }
     </style>
-""")
+    """, unsafe_allow_html=True)
 
 API_KEY = "Tt8x4uYTSKufMeLmE-ir3Q"
 KST = pytz.timezone('Asia/Seoul')
 
-# --- [2. 데이터 수집 엔진] ---
+# --- [2. 핵심 엔진] ---
 @st.cache_data(ttl=600)
 def fetch_weather(nx, ny):
     now = datetime.now(KST)
-    # 최근 3시간 내의 가장 최신 데이터 탐색
     for i in range(1, 4):
         target_time = (now - timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
         base_date = target_time.strftime("%Y%m%d")
@@ -53,15 +59,15 @@ def get_hri(w):
     return min(100, round(score, 1))
 
 # --- [3. 메인 화면 구성] ---
-# 상단 헤더
-t1, t2 = st.columns(2)
-with t1:
+# 상단 헤더: 타이틀과 실시간 시계
+t_col1, t_col2 = st.columns(2)
+with t_col1:
     st.subheader("🌊 전북 14개 시군 극한호우 실시간 감시 (HRI 2.0)")
-with t2:
+with t_col2:
     components.html(f"""
-        <div style="text-align:right; font-family:sans-serif;">
+        <div style="text-align:right; font-family:sans-serif; padding-right:10px;">
             <div id="clock" style="font-size:18px; font-weight:bold; color:#1E88E5;">⏱️ 로딩 중...</div>
-            <div style="font-size:11px; color:gray;">전북특별자치도 방재 연구용 데이터</div>
+            <div style="font-size:11px; color:gray;">전북특별자치도 방재 연구용</div>
         </div>
         <script>
             function updateClock() {{
@@ -90,7 +96,6 @@ LOCATIONS = {
     "부안": {"nx": 56, "ny": 87, "lat": 35.731, "lon": 126.733}
 }
 
-# 데이터 로드
 all_data = {name: fetch_weather(info['nx'], info['ny']) for name, info in LOCATIONS.items()}
 
 # 1행: 지도 및 순위 현황
@@ -105,10 +110,9 @@ with m1:
     st_folium(m, width="100%", height=380, returned_objects=[])
 
 with m2:
-    summary = []
-    for name in LOCATIONS.keys():
-        sc = get_hri(all_data[name])
-        summary.append({"지역": name, "HRI": sc, "상태": "🔴 위험" if sc>=95 else "🟠 주의" if sc>=80 else "🟢 정상"})
+    summary = [{"지역": name, "HRI": get_hri(all_data[name]), 
+                "상태": "🔴 위험" if get_hri(all_data[name])>=95 else "🟠 주의" if get_hri(all_data[name])>=80 else "🟢 정상"} 
+               for name in LOCATIONS.keys()]
     df_sum = pd.DataFrame(summary).sort_values("HRI", ascending=False)
     st.dataframe(df_sum, hide_index=True, use_container_width=True, height=380)
 
@@ -117,13 +121,13 @@ st.divider()
 b1, b2, b3 = st.columns(3)
 
 with b1:
-    target = st.selectbox("🎯 분석 지역 선택", list(LOCATIONS.keys()))
+    target = st.selectbox("🎯 상세 분석 지역", list(LOCATIONS.keys()))
     w = all_data[target]
     sc = get_hri(w)
     if sc >= 95: st.error("🚨 극한호우 경보")
     elif sc >= 80: st.warning("⚠️ 집중호우 주의")
     else: st.success("✅ 기상 안정")
-    if w: st.caption(f"📡 관측기준: {w['base']}")
+    if w: st.caption(f"📡 수신 시각: {w['base']}")
 
 with b2:
     fig = go.Figure(go.Indicator(mode="gauge+number", value=sc, domain={'x': [0, 1], 'y': [0, 1]},
@@ -135,7 +139,7 @@ with b2:
 
 with b3:
     if w:
-        st.metric("🌡️ 기온", f"{w['T1H']}°C")
-        st.metric("🌧️ 강수량", f"{w['RN1']}mm/h")
+        st.metric("🌡️ 현재 기온", f"{w['T1H']}°C")
+        st.metric("🌧️ 1시간 강수량", f"{w['RN1']}mm")
         st.write(f"💧 습도: {w['REH']}% | 💨 풍속: {w['WSD']}m/s")
-    else: st.info("수신 대기 중")
+    else: st.info("데이터 수신 대기 중")
