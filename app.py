@@ -8,17 +8,11 @@ from datetime import datetime, timedelta
 import pytz
 import streamlit.components.v1 as components
 
-# --- [1. 기본 설정 및 UI 최적화] ---
-st.set_page_config(page_title="전북 극한호우 실시간 감시", layout="wide", initial_sidebar_state="collapsed")
+# --- [1. 기본 설정] ---
+st.set_page_config(page_title="전북 극한호우 실시간 감시", layout="wide")
 
-# 여백 최소화 및 모바일 대응 CSS
-st.markdown("""
-    <style>
-    .block-container {padding-top: 1rem; padding-bottom: 0rem; padding-left: 1rem; padding-right: 1rem;}
-    [data-testid="stMetricValue"] {font-size: 1.5rem;}
-    .stDataFrame {font-size: 0.8rem;}
-    </style>
-    """, unsafe_allow_stdio=True)
+# 여백 최소화 CSS (최신 버전 호환 방식)
+st.write('<style>div.block-container{padding-top:1rem;}</style>', unsafe_allow_html=True)
 
 API_KEY = "Tt8x4uYTSKufMeLmE-ir3Q"
 KST = pytz.timezone('Asia/Seoul')
@@ -67,12 +61,12 @@ def get_hri(w):
     score = (pwat*32)/2500*30 + (cape/5000)*35 + (v850*15)/800*35
     return min(100, round(score, 1))
 
-# --- [3. 메인 화면 구성] ---
-# 상단 헤더 및 실시간 흐르는 시계
-t_col1, t_col2 = st.columns([3, 1])
-with t_col1:
-    st.title("🌊 전북 14개 시군 극한호우 실시간 감시 (HRI 2.0)")
-with t_col2:
+# --- [3. 메인 화면] ---
+# 상단 타이틀 및 실시간 시계
+t1, t2 = st.columns([7, 3])
+with t1:
+    st.subheader("🌊 전북 14개 시군 극한호우 실시간 감시 (HRI 2.0)")
+with t2:
     components.html(f"""
         <div style="text-align:right; font-family:sans-serif;">
             <div id="clock" style="font-size:18px; font-weight:bold; color:#1E88E5;"></div>
@@ -88,58 +82,45 @@ with t_col2:
         </script>
     """, height=50)
 
-# 전 지역 데이터 로드
 all_data = {name: fetch_weather(info['nx'], info['ny']) for name, info in LOCATIONS.items()}
 
-# 1행: 지도(65%) & 현황 순위표(35%)
-m_col1, m_col2 = st.columns([6.5, 3.5])
-with m_col1:
+# 1행: 지도 및 순위표
+m1, m2 = st.columns([6, 4])
+with m1:
     m = folium.Map(location=[35.75, 127.1], zoom_start=8, tiles="cartodbpositron")
-    folium.WmsTileLayer(url="https://mesonet.agron.iastate.edu",
-                        layers="nexrad-n0r-900913", name="Radar", fmt="image/png", transparent=True, opacity=0.3).add_to(m)
     for name, info in LOCATIONS.items():
         sc = get_hri(all_data[name])
-        folium.CircleMarker([info['lat'], info['lon']], radius=10, color="red" if sc>=95 else "orange" if sc>=80 else "green", 
-                            fill=True, fill_opacity=0.7, popup=f"{name}: {sc}").add_to(m)
-    st_folium(m, width="100%", height=380, returned_objects=[])
+        folium.CircleMarker([info['lat'], info['lon']], radius=8, color="red" if sc>=95 else "orange" if sc>=80 else "green", 
+                            fill=True, fill_opacity=0.7, popup=f"{name}:{sc}").add_to(m)
+    st_folium(m, width="100%", height=350, returned_objects=[])
 
-with m_col2:
-    st.write("📊 **위험도 순위**")
+with m2:
     summary = [{"지역": n, "HRI": get_hri(all_data[n])} for n in LOCATIONS.keys()]
     df_sum = pd.DataFrame(summary).sort_values("HRI", ascending=False)
     st.dataframe(df_sum, hide_index=True, use_container_width=True, height=350)
 
-# 2행: 상세 분석 (3분할)
+# 2행: 상세 분석
 st.divider()
-b_col1, b_col2, b_col3 = st.columns([2, 4, 4])
+b1, b2, b3 = st.columns([3, 4, 3])
 
-with b_col1:
+with b1:
     target = st.selectbox("🎯 분석 지역", list(LOCATIONS.keys()))
     w = all_data[target]
     sc = get_hri(w)
     if sc >= 95: st.error("🚨 극한호우 경보")
     elif sc >= 80: st.warning("⚠️ 집중호우 주의")
     else: st.success("✅ 기상 안정")
-    if w:
-        st.write(f"💧 습도: {w['REH']}% | 💨 풍속: {w['WSD']}m/s")
-    else: st.warning("데이터 수신 대기 중")
 
-with b_col2:
-    # SyntaxError 해결: domain, range, steps 값을 모두 채움
+with b2:
     fig = go.Figure(go.Indicator(mode="gauge+number", value=sc, domain={'x': [0, 1], 'y': [0, 1]},
-        gauge={'axis': {'range': [0, 100]}, 
-               'steps': [{'range': [0, 40], 'color': "#E8F5E9"}, 
-                         {'range': [40, 80], 'color': "#FFF59D"}, 
-                         {'range': [80, 95], 'color': "#FFCC80"}, 
-                         {'range': [95, 100], 'color': "#EF9A9A"}],
+        gauge={'axis': {'range': [0, 100]}, 'steps': [{'range': [0, 40], 'color': "#E8F5E9"}, {'range': [40, 80], 'color': "#FFF59D"}, 
+                                                  {'range': [80, 95], 'color': "#FFCC80"}, {'range': [95, 100], 'color': "#EF9A9A"}],
                'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}}))
-    fig.update_layout(margin=dict(l=10, r=10, t=30, b=0), height=200)
+    fig.update_layout(height=200, margin=dict(l=10, r=10, t=30, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
-with b_col3:
+with b3:
     if w:
-        c1, c2 = st.columns(2)
-        c1.metric("🌡️ 기온", f"{w['T1H']}°C")
-        c2.metric("🌧️ 1h 강수", f"{w['RN1']}mm")
-    else:
-        st.info("실시간 관측값 없음")
+        st.metric("🌡️ 기온", f"{w['T1H']}°C")
+        st.metric("🌧️ 1h 강수", f"{w['RN1']}mm")
+    else: st.info("수신 대기 중")
