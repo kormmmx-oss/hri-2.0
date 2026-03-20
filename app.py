@@ -92,19 +92,28 @@ if weather:
     match_name, match_percent = get_best_match(current_weather)
 
     # 게이지 표시
+        # 게이지 표시 (94번 줄 근처부터 교체)
     fig = go.Figure(go.Indicator(
-        mode="gauge+number", value=hri_score, title={'text': "HRI 2.0 위험 지수"},
-        gauge={'axis': {'range':}, 'steps': [{'range':, 'color': "#E8F5E9"}, {'range':, 'color': "#FFF59D"}, 
-                                          {'range':, 'color': "#FFCC80"}, {'range':, 'color': "#EF9A9A"}],
-               'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}}))
+        mode="gauge+number", 
+        value=hri_score, 
+        title={'text': "HRI 2.0 위험 지수"},
+        gauge={
+            'axis': {'range': [0, 100]}, # 여기 숫자가 빠져있었습니다
+            'steps': [
+                {'range': [0, 40], 'color': "#E8F5E9"}, 
+                {'range': [40, 80], 'color': "#FFF59D"}, 
+                {'range': [80, 95], 'color': "#FFCC80"}, 
+                {'range': [95, 100], 'color': "#EF9A9A"}
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4}, 
+                'thickness': 0.75,
+                'value': 95
+            }
+        }
+    ))
     st.plotly_chart(fig, use_container_width=True)
 
-    # 경보 메시지
-    if hri_score >= 95: st.error(f"🚨 [심각] 극한호우 발생 가능성 매우 높음 (지수: {hri_score})")
-    elif hri_score >= 80: st.warning(f"⚠️ [경계] 집중호우 발달 주의 (지수: {hri_score})")
-    else: st.success(f"✅ [정상] 기상 조건 안정적 (지수: {hri_score})")
-
-    st.info(f"📊 현재 기상 조건은 과거 **{match_name}** 사례와 **{match_percent}%** 일치합니다.")
     
     # 상세 관측값 표출
     cols = st.columns(3)
