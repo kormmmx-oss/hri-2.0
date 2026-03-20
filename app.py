@@ -11,18 +11,18 @@ import streamlit.components.v1 as components
 # --- [1. 설정 및 UI 최적화] ---
 st.set_page_config(page_title="전북 극한호우 감시 & HRI 2.1", layout="wide")
 
-# 상단 잘림 방지 및 여백 설정
+# 상단 잘림 방지 및 여백 설정 (5rem 확보)
 st.html("""
     <style>
     .block-container { padding-top: 5rem !important; }
-    [data-testid="stMetricValue"] { font-size: 1.4rem !important; color: #1E88E5; }
+    [data-testid="stMetricValue"] { font-size: 1.3rem !important; color: #1E88E5; }
     </style>
 """)
 
 API_KEY = "Tt8x4uYTSKufMeLmE-ir3Q"
 KST = pytz.timezone('Asia/Seoul')
 
-# 과거 사례 데이터 (HRI 2.1 변별력 조정)
+# 과거 사례 데이터 (사례별 변별력 부여)
 PAST_RECORDS = {
     "2025-09-07 군산 (152.2mm)": {"pwat": 65.5, "cape": 4500, "v850": 20.0, "updiv": 40.2, "ki": 38.0, "img": "https://img.kma.go.kr"},
     "2024-07-10 익산 (125.5mm)": {"pwat": 64.5, "cape": 3800, "v850": 23.5, "updiv": 18.3, "ki": 37.0, "img": "https://img.kma.go.kr"},
@@ -41,10 +41,10 @@ LOCATIONS = {
 
 # --- [2. 핵심 엔진: HRI 2.1 변별력 보정] ---
 def get_hri_21(pwat, cape, v850, updiv=15.0, ki=32.0):
-    fuel = (pwat * ki) / 2200 * 30
-    explosive = (cape / 3800) * 35
-    pump = (v850 * updiv) / 700 * 35
-    score = (fuel + explosive + pump) * 1.05 # 보정계수 하향하여 100 독점 방지
+    fuel = (pwat * ki) / 2300 * 30
+    explosive = (cape / 4000) * 35
+    pump = (v850 * updiv) / 750 * 35
+    score = (fuel + explosive + pump) * 1.02 # 사례 간 변별력을 위해 보정치 하향
     return min(100.0, round(score, 1))
 
 @st.cache_data(ttl=600)
@@ -66,7 +66,7 @@ def fetch_weather(nx, ny):
 # --- [3. 메인 UI] ---
 t1, t2 = st.columns(2)
 with t1:
-    mode = st.radio("📡 모드 선택", ["실시간 감시", "과거 사례 시뮬레이션"], horizontal=True)
+    mode = st.radio("📡 모드", ["실시간 감시", "과거 사례 시뮬레이션"], horizontal=True)
     st.subheader("전북 극한호우 실시간 감시 (HRI 2.1)")
 with t2:
     components.html("""<div id="clock" style="text-align:right; font-size:18px; font-weight:bold; color:#1E88E5; font-family:sans-serif;"></div>
@@ -82,7 +82,6 @@ else:
     with st.expander("🖼️ 당시 지상 일기도 확인"):
         st.image(cd['img'], use_container_width=True)
 
-# 지도 & 순위표
 m1, m2 = st.columns(2)
 with m1:
     m = folium.Map(location=[35.7, 127.1], zoom_start=8, tiles="cartodbpositron")
@@ -101,7 +100,6 @@ with m2:
         summary.append({"지역": n, "HRI": sc, "상태": "🔴 위험" if sc>=95 else "🟠 주의" if sc>=80 else "🟢 정상"})
     st.dataframe(pd.DataFrame(summary).sort_values("HRI", ascending=False), hide_index=True, use_container_width=True, height=350)
 
-# 상세 분석
 st.divider()
 b1, b2, b3 = st.columns(3)
 target = b1.selectbox("🎯 상세 분석 지역", list(LOCATIONS.keys()))
@@ -109,9 +107,13 @@ tw = weather_source[target]
 tsc = get_hri_21(tw['REH']*0.65+10, tw['T1H']*100, tw['WSD']*2.5, tw.get('up', 15.0), tw.get('ki', 32.0)) if tw else 0
 
 with b2:
-    fig = go.Figure(go.Indicator(mode="gauge+number", value=tsc, title={'text': f"{target} 지수 (HRI 2.1)"},
-        gauge={'axis': {'range':}, 'steps': [{'range':, 'color': "#E8F5E9"}, {'range':, 'color': "#FFF59D"}, 
-                                                  {'range':, 'color': "#FFCC80"}, {'range':, 'color': "#EF9A9A"}],
+    # SyntaxError 해결: 모든 range 및 steps 값을 숫자로 정확히 입력
+    fig = go.Figure(go.Indicator(mode="gauge+number", value=tsc, title={'text': f"{target} HRI 2.1"},
+        gauge={'axis': {'range': [0, 100]}, 
+               'steps': [{'range': [0, 60], 'color': "#E8F5E9"}, 
+                         {'range': [60, 80], 'color': "#FFF59D"}, 
+                         {'range': [80, 95], 'color': "#FFCC80"}, 
+                         {'range': [95, 100], 'color': "#EF9A9A"}],
                'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}}))
     fig.update_layout(height=200, margin=dict(l=10, r=10, t=40, b=0))
     st.plotly_chart(fig, use_container_width=True)
@@ -124,4 +126,4 @@ with b3:
         else:
             st.metric("🧬 사례 CAPE 환산치", f"{tw['T1H']*100:.0f} J/kg")
             st.metric("🌊 사례 수증기량(PWAT)", f"{tw['REH']*0.65+10:.1f} mm")
-            st.error("🧪 시뮬레이션 모드 활성 중")
+            st.error("🧪 시뮬레이션 모드 활성")
