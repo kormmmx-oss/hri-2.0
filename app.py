@@ -79,10 +79,13 @@ with tab1:
     is_sim_mode = False
 
 with tab2:
-    PAST_RECORDS = {"2025-09-07 군산 (152.2mm)": {"pwat": 65.5, "cape": 4500, "v850": 20.0, "up": 40.2, "ki": 38.0}}
+    PAST_RECORDS = {
+        "2025-09-07 군산 (152.2mm)": {"pwat": 65.5, "cape": 4500, "v850": 20.0, "up": 40.2, "ki": 38.0, "rn1": 152.2},
+        "2024-07-10 익산 (125.5mm)": {"pwat": 64.5, "cape": 3800, "v850": 23.5, "up": 18.3, "ki": 37.0, "rn1": 125.5}
+    }
     sim_case = st.selectbox("분석할 과거 사례 선택", list(PAST_RECORDS.keys()))
     cd = PAST_RECORDS[sim_case]
-    sim_weather = {name: {'T1H': cd['cape']/100, 'REH': (cd['pwat']-10)/0.65, 'WSD': cd['v850']/2.5, 'RN1': 152.2, 'up': cd['up'], 'ki': cd['ki']} for name in LOCATIONS.keys()}
+    sim_weather = {name: {'T1H': cd['cape']/100, 'REH': (cd['pwat']-10)/0.65, 'WSD': cd['v850']/2.5, 'RN1': cd['rn1'], 'up': cd['up'], 'ki': cd['ki']} for name in LOCATIONS.keys()}
     if st.button("🧪 시뮬레이션 적용"):
         source = sim_weather
         is_sim_mode = True
@@ -102,6 +105,7 @@ with m1:
     st_folium(m, width="100%", height=380)
 
 with m2:
+    st.write(f"📊 **{ '시뮬레이션' if is_sim_mode else '실시간' } 위험도 순위**")
     summary = []
     for n in LOCATIONS.keys():
         w = source.get(n)
@@ -110,20 +114,36 @@ with m2:
     st.dataframe(pd.DataFrame(summary).sort_values("지수", ascending=False), hide_index=True, use_container_width=True, height=350)
 
 st.divider()
-target = st.selectbox("🎯 상세 분석 지역", list(LOCATIONS.keys()))
-tw = source.get(target)
-tsc = get_hri_21(tw['REH']*0.65+10, tw['T1H']*100, tw['WSD']*2.5, target, rain_1h=tw['RN1'] if tw else 0, is_sim=is_sim_mode) if tw else 0
 
-b1, b2, b3 = st.columns(3)
-with b2:
-    # SyntaxError 해결: 모든 range 및 steps 값을 숫자로 정확히 입력
+# --- [하단 상세 분석 및 강수량 분포도 섹션] ---
+b1, b2, b3 = st.columns([3, 3.5, 3.5])
+
+with b1:
+    target = st.selectbox("🎯 상세 분석 지역 선택", list(LOCATIONS.keys()))
+    tw = source.get(target)
+    tsc = get_hri_21(tw['REH']*0.65+10, tw['T1H']*100, tw['WSD']*2.5, target, rain_1h=tw['RN1'] if tw else 0, is_sim=is_sim_mode) if tw else 0
+    
     fig = go.Figure(go.Indicator(mode="gauge+number", value=tsc, title={'text': f"{target} 위험도"},
-        gauge={'axis': {'range': [0, 100]}, 'steps': [{'range': [0, 40], 'color': "#E8F5E9"}, {'range': [40, 80], 'color': "#FFF59D"}, 
-                                                  {'range': [80, 95], 'color': "#FFCC80"}, {'range': [95, 100], 'color': "#EF9A9A"}],
+        gauge={'axis': {'range': [0, 100]}, 
+               'steps': [{'range': [0, 40], 'color': "#E8F5E9"}, 
+                         {'range': [40, 80], 'color': "#FFF59D"}, 
+                         {'range': [80, 95], 'color': "#FFCC80"}, 
+                         {'range': [95, 100], 'color': "#EF9A9A"}],
                'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}}))
+    fig.update_layout(height=250, margin=dict(l=10, r=10, t=50, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
+with b2:
+    st.write(f"📊 **전북 시군별 1시간 강수량 현황**")
+    rain_data = pd.DataFrame([{"지역": k, "강수": v['RN1'] if v else 0} for k, v in source.items()])
+    fig_bar = go.Figure(go.Bar(x=rain_data['지역'], y=rain_data['강수'], marker_color='skyblue'))
+    fig_bar.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="mm")
+    st.plotly_chart(fig_bar, use_container_width=True)
+
 with b3:
+    st.write(f"📈 **{target} 상세 관측 데이터**")
     if tw:
-        st.metric("현재 기온/사례기온", f"{tw['T1H']:.1f}°C")
+        st.metric("기온 (추정/실측)", f"{tw['T1H']:.1f}°C")
         st.metric("1시간 강수량", f"{tw['RN1']:.1f} mm")
+        if not is_sim_mode: st.caption(f"📡 API 데이터 기준: {tw['base']}")
+        else: st.error("🧪 시뮬레이션 모드 활성 중")
