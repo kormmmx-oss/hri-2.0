@@ -1,4 +1,6 @@
 streamlit
 pandas
-numpy
+requests
 plotly
+folium
+streamlit-folium
