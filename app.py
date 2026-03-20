@@ -16,7 +16,7 @@ KST = pytz.timezone('Asia/Seoul')
 now_kst = datetime.now(KST)
 api_base_time = (now_kst - timedelta(minutes=60)).replace(minute=0, second=0, microsecond=0)
 
-# 전북 14개 시군 상세 좌표 (기상청 nx/ny 및 위경도)
+# 전북 14개 시군 상세 좌표
 LOCATIONS = {
     "전주": {"nx": 63, "ny": 89, "lat": 35.824, "lon": 127.148},
     "군산": {"nx": 56, "ny": 92, "lat": 35.967, "lon": 126.736},
@@ -73,11 +73,8 @@ t_col1, t_col2 = st.columns(2)
 t_col1.metric("현재 시각 (KST)", now_kst.strftime("%Y-%m-%d %H:%M:%S"))
 t_col2.metric("API 데이터 기준", api_base_time.strftime("%Y-%m-%d %H시"))
 
-# 14개 시군 데이터 일괄 로드 (진행바 표시)
-all_data = {}
-with st.spinner('전북 14개 시군 기상 데이터를 불러오는 중...'):
-    for name, info in LOCATIONS.items():
-        all_data[name] = fetch_weather(info['nx'], info['ny'])
+# 데이터 로드
+all_data = {name: fetch_weather(info['nx'], info['ny']) for name, info in LOCATIONS.items()}
 
 # 상단: 지도와 요약 리스트
 col1, col2 = st.columns()
@@ -85,14 +82,11 @@ col1, col2 = st.columns()
 with col1:
     st.subheader("📍 전북 전역 레이더 및 위험 지도")
     m = folium.Map(location=[35.7, 127.1], zoom_start=8, tiles="cartodbpositron")
-    
-    # 레이더 WMS 레이어
     folium.WmsTileLayer(
         url="https://mesonet.agron.iastate.edu",
         layers="nexrad-n0r-900913", name="Radar", fmt="image/png",
         transparent=True, opacity=0.4, overlay=True
     ).add_to(m)
-    
     for name, info in LOCATIONS.items():
         score = get_hri_score(all_data[name])
         folium.CircleMarker(
@@ -108,22 +102,30 @@ with col2:
     for name in LOCATIONS.keys():
         score = get_hri_score(all_data[name])
         summary_data.append({"지역": name, "HRI 지수": score, "상태": "🔴 위험" if score >= 95 else "🟠 경계" if score >= 80 else "🟢 정상"})
-    
     st.dataframe(pd.DataFrame(summary_data).sort_values("HRI 지수", ascending=False), hide_index=True, use_container_width=True)
-    
     selected_name = st.selectbox("🎯 상세 분석 지역 선택", list(LOCATIONS.keys()))
     current_hri = get_hri_score(all_data[selected_name])
-    st.metric(f"{selected_name} HRI 지수", f"{current_hri}점")
 
 # 하단: 게이지 및 상세 데이터
 st.divider()
 c1, c2 = st.columns(2)
 
 with c1:
+    # SyntaxError 해결: range 및 steps 값을 숫자로 정확히 채움
     fig = go.Figure(go.Indicator(
         mode="gauge+number", value=current_hri,
-        gauge={'axis': {'range':}, 'steps': [{'range':, 'color': "#E8F5E9"}, {'range':, 'color': "#FFF59D"}, 
-                                          {'range':, 'color': "#FFCC80"}, {'range':, 'color': "#EF9A9A"}]}))
+        title={'text': f"{selected_name} 위험 지수"},
+        gauge={
+            'axis': {'range': [0, 100]},
+            'steps': [
+                {'range': [0, 40], 'color': "#E8F5E9"}, 
+                {'range': [40, 80], 'color': "#FFF59D"}, 
+                {'range': [80, 95], 'color': "#FFCC80"}, 
+                {'range': [95, 100], 'color': "#EF9A9A"}
+            ],
+            'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}
+        }
+    ))
     st.plotly_chart(fig, use_container_width=True)
 
 with c2:
