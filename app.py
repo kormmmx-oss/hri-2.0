@@ -36,11 +36,10 @@ LOCATIONS = {
     "부안": {"nx": 56, "ny": 87, "lat": 35.731, "lon": 126.733, "mod": 1.03}
 }
 
-# --- [2. 핵심 엔진: 데이터 수집 및 HRI 2.1 계산] ---
+# --- [2. 핵심 엔진] ---
 @st.cache_data(ttl=600)
 def fetch_realtime_data(nx, ny):
     now = datetime.now(KST)
-    # 최근 6시간 이내의 가장 최신 유효 데이터를 찾음
     for i in range(0, 6):
         t = (now - timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
         base_date = t.strftime("%Y%m%d")
@@ -58,14 +57,13 @@ def fetch_realtime_data(nx, ny):
     return None
 
 def get_hri_21(pwat, cape, v850, loc_name, rain_1h=0, is_sim=False):
-    # 실시간 모드 시 강수 유무에 따른 보정 계수
     stability = 0.3 if (not is_sim and rain_1h <= 0) else 1.0
     mod = LOCATIONS[loc_name]["mod"]
     score = ((pwat*32)/2300*30 + (cape/4000)*35 + (v850*15)/750*35) * 1.02 * mod * stability
     return min(100.0, round(score, 1))
 
-# --- [3. 메인 레이아웃 및 탭 구성] ---
-t1, t2 = st.columns([7, 3])
+# --- [3. 메인 UI] ---
+t1, t2 = st.columns(2)
 with t1:
     st.subheader("⚠️ 전북 극한호우 실시간 감시 & 시뮬레이터")
 with t2:
@@ -75,36 +73,25 @@ with t2:
 
 tab1, tab2 = st.tabs(["📡 실시간 극한호우 감시", "🧪 7대 사례 시뮬레이터"])
 
-# --- [탭 1: 실시간 감시] ---
 with tab1:
-    # 앱 실행 시 14개 시군 데이터 즉시 로드
-    realtime_weather = {}
-    with st.spinner('전북 실시간 데이터를 수신 중입니다...'):
-        for name, info in LOCATIONS.items():
-            realtime_weather[name] = fetch_realtime_data(info['nx'], info['ny'])
-    
+    realtime_weather = {name: fetch_realtime_data(info['nx'], info['ny']) for name, info in LOCATIONS.items()}
     source = realtime_weather
     is_sim_mode = False
-    if any(realtime_weather.values()):
-        st.caption(f"📡 최신 데이터 수신 기준: {next(v['base'] for v in realtime_weather.values() if v)}")
 
-# --- [탭 2: 시뮬레이터] ---
 with tab2:
     PAST_RECORDS = {"2025-09-07 군산 (152.2mm)": {"pwat": 65.5, "cape": 4500, "v850": 20.0, "up": 40.2, "ki": 38.0}}
     sim_case = st.selectbox("분석할 과거 사례 선택", list(PAST_RECORDS.keys()))
     cd = PAST_RECORDS[sim_case]
     sim_weather = {name: {'T1H': cd['cape']/100, 'REH': (cd['pwat']-10)/0.65, 'WSD': cd['v850']/2.5, 'RN1': 152.2, 'up': cd['up'], 'ki': cd['ki']} for name in LOCATIONS.keys()}
-    
-    if st.button("🧪 시뮬레이션 데이터 적용"):
+    if st.button("🧪 시뮬레이션 적용"):
         source = sim_weather
         is_sim_mode = True
     else:
-        # 기본적으로는 실시간 탭 데이터 유지
         source = realtime_weather
         is_sim_mode = False
 
-# --- [4. 공통 출력부 (지도, 순위표, 게이지)] ---
-m1, m2 = st.columns([6, 4])
+# 지도 & 순위표
+m1, m2 = st.columns(2)
 with m1:
     m = folium.Map(location=[35.75, 127.1], zoom_start=8, tiles="cartodbpositron")
     for name, info in LOCATIONS.items():
@@ -122,21 +109,19 @@ with m2:
         summary.append({"지역": n, "지수": sc, "1h 강수": w['RN1'] if w else 0})
     st.dataframe(pd.DataFrame(summary).sort_values("지수", ascending=False), hide_index=True, use_container_width=True, height=350)
 
-# 상세 분석 하단
 st.divider()
-target = st.selectbox("🎯 분석 지역 선택", list(LOCATIONS.keys()))
+target = st.selectbox("🎯 상세 분석 지역", list(LOCATIONS.keys()))
 tw = source.get(target)
 tsc = get_hri_21(tw['REH']*0.65+10, tw['T1H']*100, tw['WSD']*2.5, target, rain_1h=tw['RN1'] if tw else 0, is_sim=is_sim_mode) if tw else 0
 
 b1, b2, b3 = st.columns(3)
-with b1:
-    fig = go.Figure(go.Indicator(mode="gauge+number", value=tsc, title={'text': f"{target} 위험도"},
-        gauge={'axis': {'range':}, 'steps': [{'range':, 'color': "#E8F5E9"}, {'range':, 'color': "#FFF59D"}, 
-                                          {'range':, 'color': "#FFCC80"}, {'range':, 'color': "#EF9A9A"}]}))
-    st.plotly_chart(fig, use_container_width=True)
-
 with b2:
-    st.bar_chart(pd.DataFrame([{"지역": k, "강수": v['RN1'] if v else 0} for k, v in source.items()]).set_index("지역"))
+    # SyntaxError 해결: 모든 range 및 steps 값을 숫자로 정확히 입력
+    fig = go.Figure(go.Indicator(mode="gauge+number", value=tsc, title={'text': f"{target} 위험도"},
+        gauge={'axis': {'range': [0, 100]}, 'steps': [{'range': [0, 40], 'color': "#E8F5E9"}, {'range': [40, 80], 'color': "#FFF59D"}, 
+                                                  {'range': [80, 95], 'color': "#FFCC80"}, {'range': [95, 100], 'color': "#EF9A9A"}],
+               'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}}))
+    st.plotly_chart(fig, use_container_width=True)
 
 with b3:
     if tw:
