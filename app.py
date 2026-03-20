@@ -6,17 +6,26 @@ import folium
 from streamlit_folium import st_folium
 from datetime import datetime, timedelta
 import pytz
+import streamlit.components.v1 as components
 
-# --- [1. 기본 설정 및 14개 시군 좌표 정의] ---
-st.set_page_config(page_title="전북 14개 시군 극한호우 실시간 감시", layout="wide")
+# --- [1. 기본 설정 및 시간 정의] ---
+st.set_page_config(page_title="전북 극한호우 실시간 감시", layout="wide", initial_sidebar_state="collapsed")
+
+# CSS를 이용한 UI 간격 최적화 (여백 제거)
+st.markdown("""
+    <style>
+    .block-container {padding-top: 1rem; padding-bottom: 0rem; padding-left: 2rem; padding-right: 2rem;}
+    [data-testid="stMetricValue"] {font-size: 1.8rem;}
+    </style>
+    """, unsafe_allow_stdio=True)
+
 API_KEY = "Tt8x4uYTSKufMeLmE-ir3Q"
 KST = pytz.timezone('Asia/Seoul')
 
-# 시간 정의: 실황 데이터는 매시 40분 이후 안정적이므로 1시간 전 데이터 기준
+# API 조회 기준 시간 (1시간 전 데이터)
 now_kst = datetime.now(KST)
 api_base_time = (now_kst - timedelta(minutes=60)).replace(minute=0, second=0, microsecond=0)
 
-# 전북 14개 시군 상세 좌표
 LOCATIONS = {
     "전주": {"nx": 63, "ny": 89, "lat": 35.824, "lon": 127.148},
     "군산": {"nx": 56, "ny": 92, "lat": 35.967, "lon": 126.736},
@@ -34,15 +43,14 @@ LOCATIONS = {
     "부안": {"nx": 56, "ny": 87, "lat": 35.731, "lon": 126.733}
 }
 
-# --- [2. 데이터 수집 및 HRI 2.0 엔진] ---
+# --- [2. 핵심 함수] ---
 @st.cache_data(ttl=600)
 def fetch_weather(nx, ny):
     base_date = api_base_time.strftime("%Y%m%d")
     base_time = api_base_time.strftime("%H00")
-    url = "http://apis.data.go.kr"
-    params = {'serviceKey': API_KEY, 'dataType': 'JSON', 'base_date': base_date, 'base_time': base_time, 'nx': nx, 'ny': ny}
+    url = f"http://apis.data.go.kr{API_KEY}&dataType=JSON&base_date={base_date}&base_time={base_time}&nx={nx}&ny={ny}"
     try:
-        res = requests.get(url, params=params, timeout=5).json()
+        res = requests.get(url, timeout=5).json()
         items = res['response']['body']['items']['item']
         return {
             'T1H': float(next(i['obsrValue'] for i in items if i['category'] == 'T1H')),
@@ -52,86 +60,78 @@ def fetch_weather(nx, ny):
         }
     except: return None
 
-def get_hri_score(w):
+def get_hri(w):
     if not w: return 0.0
     pwat, v850, cape = w['REH']*0.65+10, w['WSD']*2.5, w['T1H']*100
-    updiv, ki = 15.0, 32.0
-    score = (pwat*ki)/2500*30 + (cape/5000)*35 + (v850*updiv)/800*35
+    score = (pwat*32)/2500*30 + (cape/5000)*35 + (v850*15)/800*35
     return min(100, round(score, 1))
 
-def get_color(score):
-    if score >= 95: return "red"
-    if score >= 80: return "orange"
-    if score >= 60: return "yellow"
-    return "green"
-
-# --- [3. 메인 대시보드 레이아웃] ---
-st.title("🌊 전북 14개 시군 극한호우 실시간 감시 (HRI 2.0)")
-
-# 시간 정보
-t_col1, t_col2 = st.columns(2)
-t_col1.metric("현재 시각 (KST)", now_kst.strftime("%Y-%m-%d %H:%M:%S"))
-t_col2.metric("API 데이터 기준", api_base_time.strftime("%Y-%m-%d %H시"))
+# --- [3. 화면 구성] ---
+# 상단 타이틀 및 실시간 시계 (JavaScript)
+t_col1, t_col2 = st.columns([7, 3])
+with t_col1:
+    st.title("🌊 전북 14개 시군 극한호우 실시간 감시 (HRI 2.0)")
+with t_col2:
+    st.write("⏱️ **현재 실시간 시각 (KST)**")
+    components.html("""
+        <div id="clock" style="font-size:24px; font-weight:bold; color:#1E88E5; font-family:sans-serif;"></div>
+        <script>
+            function updateClock() {
+                var now = new Date();
+                var kst = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + (9 * 3600000));
+                document.getElementById('clock').innerHTML = kst.toLocaleString('ko-KR');
+            }
+            setInterval(updateClock, 1000);
+            updateClock();
+        </script>
+    """, height=40)
+    st.caption(f"📡 API 연동 기준: {api_base_time.strftime('%m/%d %H:00')}")
 
 # 데이터 로드
 all_data = {name: fetch_weather(info['nx'], info['ny']) for name, info in LOCATIONS.items()}
 
-# 상단: 지도와 요약 리스트 (st.columns(2)로 숫자 명시)
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("📍 전북 전역 레이더 및 위험 지도")
-    m = folium.Map(location=[35.7, 127.1], zoom_start=8, tiles="cartodbpositron")
-    folium.WmsTileLayer(
-        url="https://mesonet.agron.iastate.edu",
-        layers="nexrad-n0r-900913", name="Radar", fmt="image/png",
-        transparent=True, opacity=0.4, overlay=True
-    ).add_to(m)
+# 메인 레이아웃: 1행 (지도 & 현황판)
+m_col1, m_col2 = st.columns([6, 4])
+with m_col1:
+    m = folium.Map(location=[35.75, 127.1], zoom_start=8, tiles="cartodbpositron")
+    folium.WmsTileLayer(url="https://mesonet.agron.iastate.edu",
+                        layers="nexrad-n0r-900913", name="Radar", fmt="image/png", transparent=True, opacity=0.4).add_to(m)
     for name, info in LOCATIONS.items():
-        score = get_hri_score(all_data[name])
-        folium.CircleMarker(
-            location=[info['lat'], info['lon']], radius=10,
-            color=get_color(score), fill=True, fill_opacity=0.7,
-            popup=f"<b>{name}</b><br>HRI: {score}"
-        ).add_to(m)
-    st_folium(m, width=700, height=500)
+        sc = get_hri(all_data[name])
+        folium.CircleMarker([info['lat'], info['lon']], radius=10, color="red" if sc>=95 else "orange" if sc>=80 else "green", 
+                            fill=True, fill_opacity=0.7, popup=f"{name}: {sc}").add_to(m)
+    st_folium(m, width="100%", height=400, returned_objects=[])
 
-with col2:
-    st.subheader("📋 14개 시군 위험도 현황")
-    summary_data = []
-    for name in LOCATIONS.keys():
-        score = get_hri_score(all_data[name])
-        summary_data.append({"지역": name, "HRI 지수": score, "상태": "🔴 위험" if score >= 95 else "🟠 경계" if score >= 80 else "🟢 정상"})
-    st.dataframe(pd.DataFrame(summary_data).sort_values("HRI 지수", ascending=False), hide_index=True, use_container_width=True)
-    selected_name = st.selectbox("🎯 상세 분석 지역 선택", list(LOCATIONS.keys()))
-    current_hri = get_hri_score(all_data[selected_name])
+with m_col2:
+    st.write("📊 **14개 시군 위험 순위**")
+    summary = [{"지역": n, "HRI": get_hri(all_data[n])} for n in LOCATIONS.keys()]
+    df_sum = pd.DataFrame(summary).sort_values("HRI", ascending=False)
+    st.dataframe(df_sum, hide_index=True, use_container_width=True, height=365)
 
-# 하단: 게이지 및 상세 데이터
+# 메인 레이아웃: 2행 (상세 분석 & 게이지)
 st.divider()
-c1, c2 = st.columns(2)
+b_col1, b_col2, b_col3 = st.columns([3, 4, 3])
 
-with c1:
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number", value=current_hri,
-        title={'text': f"{selected_name} 위험 지수"},
-        gauge={
-            'axis': {'range': [0, 100]},
-            'steps': [
-                {'range': [0, 40], 'color': "#E8F5E9"}, 
-                {'range': [40, 80], 'color': "#FFF59D"}, 
-                {'range': [80, 95], 'color': "#FFCC80"}, 
-                {'range': [95, 100], 'color': "#EF9A9A"}
-            ],
-            'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}
-        }
-    ))
+with b_col1:
+    target = st.selectbox("🎯 분석 지역 선택", list(LOCATIONS.keys()))
+    w = all_data[target]
+    sc = get_hri(w)
+    if sc >= 95: st.error("🚨 극한호우 경보")
+    elif sc >= 80: st.warning("⚠️ 집중호우 주의")
+    else: st.success("✅ 기상 안정")
+
+with b_col2:
+    fig = go.Figure(go.Indicator(mode="gauge+number", value=sc, domain={'x':, 'y':},
+        gauge={'axis': {'range':}, 'steps': [{'range':, 'color': "#E8F5E9"}, {'range':, 'color': "#FFF59D"}, 
+                                          {'range':, 'color': "#FFCC80"}, {'range':, 'color': "#EF9A9A"}],
+               'threshold': {'line': {'color': "red", 'width': 4}, 'value': 95}}))
+    fig.update_layout(margin=dict(l=20, r=20, t=30, b=0), height=250)
     st.plotly_chart(fig, use_container_width=True)
 
-with c2:
-    st.subheader(f"🔍 {selected_name} 실시간 관측값")
-    w = all_data[selected_name]
+with b_col3:
+    st.write(f"🔍 **{target} 실황**")
     if w:
-        st.write(f"🌡️ 기온: **{w['T1H']}°C** | 💧 습도: **{w['REH']}%**")
-        st.write(f"💨 풍속: **{w['WSD']}m/s** | 🌧️ 1시간 강수: **{w['RN1']}mm**")
-    else:
-        st.warning("데이터 수신 대기 중 (API 키 활성화 여부를 확인하세요)")
+        st.metric("🌡️ 기온", f"{w['T1H']}°C")
+        st.metric("🌧️ 강수량", f"{w['RN1']}mm/h")
+        st.write(f"💧 습도: {w['REH']}% | 💨 풍속: {w['WSD']}m/s")
+    else: st.warning("수신 대기 중")
