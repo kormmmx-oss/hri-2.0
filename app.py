@@ -76,8 +76,8 @@ t_col2.metric("API 데이터 기준", api_base_time.strftime("%Y-%m-%d %H시"))
 # 데이터 로드
 all_data = {name: fetch_weather(info['nx'], info['ny']) for name, info in LOCATIONS.items()}
 
-# 상단: 지도와 요약 리스트
-col1, col2 = st.columns()
+# 상단: 지도와 요약 리스트 (st.columns(2)로 숫자 명시)
+col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("📍 전북 전역 레이더 및 위험 지도")
@@ -94,7 +94,7 @@ with col1:
             color=get_color(score), fill=True, fill_opacity=0.7,
             popup=f"<b>{name}</b><br>HRI: {score}"
         ).add_to(m)
-    st_folium(m, width=750, height=550)
+    st_folium(m, width=700, height=500)
 
 with col2:
     st.subheader("📋 14개 시군 위험도 현황")
@@ -111,7 +111,6 @@ st.divider()
 c1, c2 = st.columns(2)
 
 with c1:
-    # SyntaxError 해결: range 및 steps 값을 숫자로 정확히 채움
     fig = go.Figure(go.Indicator(
         mode="gauge+number", value=current_hri,
         title={'text': f"{selected_name} 위험 지수"},
@@ -135,4 +134,4 @@ with c2:
         st.write(f"🌡️ 기온: **{w['T1H']}°C** | 💧 습도: **{w['REH']}%**")
         st.write(f"💨 풍속: **{w['WSD']}m/s** | 🌧️ 1시간 강수: **{w['RN1']}mm**")
     else:
-        st.warning("데이터 수신 대기 중...")
+        st.warning("데이터 수신 대기 중 (API 키 활성화 여부를 확인하세요)")
